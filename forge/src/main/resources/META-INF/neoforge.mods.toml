@@ -6,7 +6,7 @@ license = "MPL"
 
 [[mods]]
 modId = "observable"
-version = "4.5.1"
+version = "${version}"
 displayName = "Observable"
 description = '''
 See what's lagging your world.
