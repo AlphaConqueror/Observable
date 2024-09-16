@@ -86,11 +86,11 @@ components.java {
 // Credit to shedaniel (architectury) for most of this
 unifiedPublishing {
     project {
-        displayName = "$project.version (forge)"
+        displayName = "$project.version (neoforge)"
         releaseType = "$rootProject.release_channel"
         changelog = "See Observable's GitHub releases page for all changes between versions."
         gameVersions = ["$project.minecraft_version"]
-        gameLoaders = ["forge"]
+        gameLoaders = ["neoforge"]
         mainPublication remapJar
         relations {
             depends {
