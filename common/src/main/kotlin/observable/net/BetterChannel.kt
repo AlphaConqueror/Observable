@@ -3,6 +3,8 @@ package observable.net
 import dev.architectury.networking.NetworkManager
 import dev.architectury.networking.NetworkManager.Side
 import dev.architectury.networking.transformers.SplitPacketTransformer
+import dev.architectury.platform.Platform
+import dev.architectury.utils.Env
 import kotlinx.serialization.*
 import kotlinx.serialization.protobuf.ProtoBuf
 import net.minecraft.network.RegistryFriendlyByteBuf
@@ -47,8 +49,12 @@ class BetterChannel(val id: ResourceLocation) {
                 buf.writeByteArray(bos.toByteArray())
             }
         }
-        NetworkManager.registerReceiver(Side.S2C, CustomPacketPayload.Type(s2cLocation), codec, listOf(SplitPacketTransformer())) { value, ctx ->
-            handlers[value.className]?.invoke(value.data, ctx)
+        if (Platform.getEnvironment() == Env.SERVER) {
+            NetworkManager.registerS2CPayloadType(CustomPacketPayload.Type(s2cLocation), codec, listOf(SplitPacketTransformer()))
+        } else {
+            NetworkManager.registerReceiver(Side.S2C, CustomPacketPayload.Type(s2cLocation), codec, listOf(SplitPacketTransformer())) { value, ctx ->
+                handlers[value.className]?.invoke(value.data, ctx)
+            }
         }
         NetworkManager.registerReceiver(Side.C2S, CustomPacketPayload.Type(c2sLocation), codec) { value, ctx ->
             handlers[value.className]?.invoke(value.data, ctx)
