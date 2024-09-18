@@ -2,6 +2,7 @@ package observable.net
 
 import dev.architectury.networking.NetworkManager
 import dev.architectury.networking.NetworkManager.Side
+import dev.architectury.networking.NetworkManager.canPlayerReceive
 import dev.architectury.networking.transformers.SplitPacketTransformer
 import dev.architectury.platform.Platform
 import dev.architectury.utils.Env
@@ -57,6 +58,7 @@ class BetterChannel(val id: ResourceLocation) {
             }
         }
         NetworkManager.registerReceiver(Side.C2S, CustomPacketPayload.Type(c2sLocation), codec) { value, ctx ->
+            ctx.player
             handlers[value.className]?.invoke(value.data, ctx)
         }
     }
@@ -68,7 +70,12 @@ class BetterChannel(val id: ResourceLocation) {
         LOGGER.info("Registered ${T::class.java}")
     }
 
-    inline fun <reified T> sendToPlayers(players: Iterable<ServerPlayer>, msg: T) = NetworkManager.sendToPlayers(players, createPayload(msg, Side.S2C))
+    inline fun <reified T> sendToPlayers(players: Iterable<ServerPlayer>, msg: T) = NetworkManager.sendToPlayers(
+        players.filter {
+            canPlayerReceive(it, s2cLocation)
+        },
+        createPayload(msg, Side.S2C)
+    )
     inline fun <reified T> sendToPlayer(player: ServerPlayer, msg: T) = sendToPlayers(listOf(player), msg)
     inline fun <reified T> sendToPlayersSplit(players: Iterable<ServerPlayer>, msg: T) = sendToPlayers(players, msg)
     inline fun <reified T> sendToServer(msg: T) = NetworkManager.sendToServer(createPayload(msg, Side.C2S))
