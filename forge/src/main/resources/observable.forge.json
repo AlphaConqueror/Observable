@@ -1,0 +1,13 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "observable.mixin",
+  "compatibilityLevel": "JAVA_8",
+  "refmap": "observable.forge.refmap.json",
+  "mixins": ["LevelMixin", "ServerLevelMixin"],
+  "client": [],
+  "server": [],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

@@ -9,14 +9,10 @@ architectury {
 }
 
 loom {
-
     forge {
-//        useFabricMixin = true
-
-        mixinConfig "observable.common.json"
+        mixinConfig "observable.forge.json"
     }
 }
-
 
 configurations {
     common
@@ -67,6 +63,8 @@ shadowJar {
     classifier "dev-shadow"
 
     exclude "**/*.kotlin_metadata"
+    exclude '**/observable.common.json'
+    exclude '**/observable-common-refmap.json'
 
     relocate 'kotlinx.serialization.protobuf', 'observable.shadow.kotlinx.serialization.protobuf'
 }
