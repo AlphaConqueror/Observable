@@ -11,6 +11,10 @@ import dev.architectury.event.events.common.CommandRegistrationEvent
 import dev.architectury.event.events.common.LifecycleEvent
 import dev.architectury.registry.client.keymappings.KeyMappingRegistry
 import dev.architectury.utils.GameInstance
+import net.luckperms.api.LuckPerms
+import net.luckperms.api.LuckPermsProvider
+import net.luckperms.api.model.user.User
+import net.luckperms.api.model.user.UserManager
 import net.minecraft.ChatFormatting
 import net.minecraft.Util
 import net.minecraft.client.KeyMapping
@@ -41,16 +45,18 @@ import observable.server.ServerSettings
 import observable.server.TypeMap
 import org.apache.logging.log4j.LogManager
 import org.lwjgl.glfw.GLFW
+import java.util.*
 
 object Observable {
     const val MOD_ID = "observable"
+    private const val PERMISSION_NODE = "observable"
 
     val PROFILE_KEYBIND by lazy {
         KeyMapping(
-            "key.observable.profile",
-            InputConstants.Type.KEYSYM,
-            GLFW.GLFW_KEY_R,
-            "category.observable.keybinds"
+                "key.observable.profile",
+                InputConstants.Type.KEYSYM,
+                GLFW.GLFW_KEY_R,
+                "category.observable.keybinds"
         )
     }
 
@@ -63,8 +69,27 @@ object Observable {
     fun hasPermission(player: Player): Boolean {
         if (ServerSettings.allPlayersAllowed) return true
         if (ServerSettings.allowedPlayers.contains(player.gameProfile.id.toString())) return true
+
+        // if LuckPerms is loaded, use LuckPerms
+        try {
+            val luckPerms = LuckPermsProvider.get()
+            return getUser(luckPerms, player.gameProfile.id).cachedData
+                    .permissionData.checkPermission(PERMISSION_NODE).asBoolean()
+        } catch (ignored: IllegalStateException) {}
+
         if (GameInstance.getServer()?.playerList?.isOp(player.gameProfile) != false) return true
         return GameInstance.getServer()?.isSingleplayer ?: false
+    }
+
+    private fun getUser(luckPerms: LuckPerms, uniqueId: UUID): User {
+        val userManager: UserManager = luckPerms.userManager
+        var user = userManager.getUser(uniqueId)
+
+        if (user == null) {
+            user = userManager.loadUser(uniqueId).join()
+        }
+
+        return user!!
     }
 
     @JvmStatic
@@ -90,12 +115,12 @@ object Observable {
         CHANNEL.register { t: C2SPacket.RequestAvailability, supplier ->
             (supplier.get().player as? ServerPlayer)?.let {
                 CHANNEL.sendToPlayer(
-                    it,
-                    if (hasPermission(it)) {
-                        S2CPacket.Availability.Available
-                    } else {
-                        S2CPacket.Availability.NoPermissions
-                    }
+                        it,
+                        if (hasPermission(it)) {
+                            S2CPacket.Availability.Available
+                        } else {
+                            S2CPacket.Availability.NoPermissions
+                        }
                 )
             }
         }
@@ -132,6 +157,7 @@ object Observable {
                     PROFILE_SCREEN.action = ProfileScreen.Action.DEFAULT
                     PROFILE_SCREEN.startBtn?.active = true
                 }
+
                 S2CPacket.Availability.NoPermissions -> {
                     PROFILE_SCREEN.action = ProfileScreen.Action.NO_PERMISSIONS
                     PROFILE_SCREEN.startBtn?.active = false
@@ -144,19 +170,19 @@ object Observable {
             Observable.LOGGER.info("Notifying player")
             val tps = "%.2f".format(t.tps)
             GameInstance.getClient().gui.chat.addMessage(
-                TranslatableComponent(
-                    "text.observable.suggest",
-                    tps,
-                    TranslatableComponent("text.observable.suggest_action").withStyle(ChatFormatting.UNDERLINE)
-                        .withStyle {
-                            it.withClickEvent(object : ClickEvent(null, "") {
-                                override fun getAction(): Action? {
-                                    GameInstance.getClient().setScreen(PROFILE_SCREEN)
-                                    return null
-                                }
-                            })
-                        }
-                )
+                    TranslatableComponent(
+                            "text.observable.suggest",
+                            tps,
+                            TranslatableComponent("text.observable.suggest_action").withStyle(ChatFormatting.UNDERLINE)
+                                    .withStyle {
+                                        it.withClickEvent(object : ClickEvent(null, "") {
+                                            override fun getAction(): Action? {
+                                                GameInstance.getClient().setScreen(PROFILE_SCREEN)
+                                                return null
+                                            }
+                                        })
+                                    }
+                    )
             )
         }
 
@@ -169,110 +195,111 @@ object Observable {
 
         CommandRegistrationEvent.EVENT.register { dispatcher, dedicated ->
             val cmd = literal("observable")
-                .requires { it.hasPermission(4) }
-                .executes {
-                    it.source.sendSuccess(TextComponent(ServerSettings.toString()), false)
-                    1
-                }
-                .then(
-                    literal("run").then(
-                        argument("duration", integer()).executes { ctx ->
-                            val duration = getInteger(ctx, "duration")
-                            PROFILER.runWithDuration(ctx.source.entity as? ServerPlayer, duration, false) { result ->
-                                ctx.source.sendSuccess(result, false)
-                            }
-                            ctx.source.sendSuccess(TranslatableComponent("text.observable.profile_started", duration), false)
-                            1
-                        }
-                    )
-                )
-                .then(
-                    literal("allow").then(
-                        argument("player", gameProfile()).executes { ctx ->
-                            getGameProfiles(ctx, "player").forEach { player ->
-                                ServerSettings.allowedPlayers.add(player.id.toString())
-                                GameInstance.getServer()?.playerList?.getPlayer(player.id)?.let {
-                                    CHANNEL.sendToPlayer(it, S2CPacket.Availability.Available)
-                                }
-                            }
-                            ServerSettings.sync()
-                            1
-                        }
-                    )
-                )
-                .then(
-                    literal("deny").then(
-                        argument("player", gameProfile()).executes { ctx ->
-                            getGameProfiles(ctx, "player").forEach { player ->
-                                ServerSettings.allowedPlayers.remove(player.id.toString())
-                                GameInstance.getServer()?.playerList?.getPlayer(player.id)?.let {
-                                    CHANNEL.sendToPlayer(it, S2CPacket.Availability.NoPermissions)
-                                }
-                            }
-                            ServerSettings.sync()
-                            1
-                        }
-                    )
-                )
-                .then(
-                    literal("set").let {
-                        ServerSettings::class.java.declaredFields.fold(it) { setCmd, field ->
-                            val argType = TypeMap[field.type] ?: return@fold setCmd
-                            setCmd.then(
-                                literal(field.name).then(
-                                    argument("newVal", argType())
-                                        .executes { ctx ->
-                                            try {
-                                                field.isAccessible = true
-                                                field.set(ServerSettings, ctx.getArgument("newVal", field.type))
-                                                ServerSettings.sync()
-                                                1
-                                            } catch (e: Exception) {
-                                                e.printStackTrace()
-                                                ctx.source.sendFailure(TextComponent("Error setting value\n$e"))
-                                                0
-                                            }
-                                        }
-                                )
-                            )
-                        }
+                    .requires { it.hasPermission(4) }
+                    .executes {
+                        it.source.sendSuccess(TextComponent(ServerSettings.toString()), false)
+                        1
                     }
-                )
-                .then(
-                    literal("tp").then(
-                        argument("dim", dimension())
-                            .then(
-                                literal("entity").then(
-                                    argument("id", integer()).executes { ctx ->
-                                        withDimMove(ctx) { player, level ->
-                                            val id = getInteger(ctx, "id")
-                                            level.getEntity(id)?.position()?.apply {
-                                                LOGGER.info("Moving to ($x, $y, $z) in $level")
-                                                player.moveTo(this)
-                                            } ?: player.displayClientMessage(
-                                                TranslatableComponent("text.observable.entity_not_found", level.toString()),
-                                                true
-                                            )
+                    .then(
+                            literal("run").then(
+                                    argument("duration", integer()).executes { ctx ->
+                                        val duration = getInteger(ctx, "duration")
+                                        PROFILER.runWithDuration(ctx.source.entity as? ServerPlayer, duration, false) { result ->
+                                            ctx.source.sendSuccess(result, false)
                                         }
+                                        ctx.source.sendSuccess(TranslatableComponent("text.observable.profile_started", duration), false)
                                         1
                                     }
-                                )
-                            )
-                            .then(
-                                literal("position")
-                                    .then(
-                                        argument("pos", blockPos()).executes { ctx ->
-                                            withDimMove(ctx) { player, _ ->
-                                                val pos = getLoadedBlockPos(ctx, "pos")
-                                                player.moveTo(pos, 0F, 0F)
-                                            }
-                                            1
-                                        }
-                                    )
-
                             )
                     )
-                )
+                    .then(
+                            literal("allow").then(
+                                    argument("player", gameProfile()).executes { ctx ->
+                                        getGameProfiles(ctx, "player").forEach { player ->
+                                            ServerSettings.allowedPlayers.add(player.id.toString())
+                                            GameInstance.getServer()?.playerList?.getPlayer(player.id)?.let {
+                                                CHANNEL.sendToPlayer(it, S2CPacket.Availability.Available)
+                                            }
+                                        }
+                                        ServerSettings.sync()
+                                        1
+                                    }
+                            )
+                    )
+                    .then(
+                            literal("deny").then(
+                                    argument("player", gameProfile()).executes { ctx ->
+                                        getGameProfiles(ctx, "player").forEach { player ->
+                                            ServerSettings.allowedPlayers.remove(player.id.toString())
+                                            GameInstance.getServer()?.playerList?.getPlayer(player.id)?.let {
+                                                CHANNEL.sendToPlayer(it, S2CPacket.Availability.NoPermissions)
+                                            }
+                                        }
+                                        ServerSettings.sync()
+                                        1
+                                    }
+                            )
+                    )
+                    .then(
+                            literal("set").let {
+                                ServerSettings::class.java.declaredFields.fold(it) { setCmd, field ->
+                                    val argType = TypeMap[field.type] ?: return@fold setCmd
+                                    setCmd.then(
+                                            literal(field.name).then(
+                                                    argument("newVal", argType())
+                                                            .executes { ctx ->
+                                                                try {
+                                                                    field.isAccessible = true
+                                                                    field.set(ServerSettings, ctx.getArgument("newVal", field.type))
+                                                                    ServerSettings.sync()
+                                                                    1
+                                                                } catch (e: Exception) {
+                                                                    e.printStackTrace()
+                                                                    ctx.source.sendFailure(TextComponent("Error setting value\n$e"))
+                                                                    0
+                                                                }
+                                                            }
+                                            )
+                                    )
+                                }
+                            }
+                    )
+                    .then(
+                            literal("tp").then(
+                                    argument("dim", dimension())
+                                            .then(
+                                                    literal("entity").then(
+                                                            argument("id", integer()).executes { ctx ->
+                                                                withDimMove(ctx) { player, level ->
+                                                                    val id = getInteger(ctx, "id")
+                                                                    level.getEntity(id)?.position()?.apply {
+                                                                        LOGGER.info("Moving to ($x, $y, $z) in $level")
+                                                                        player.moveTo(this)
+                                                                    }
+                                                                            ?: player.displayClientMessage(
+                                                                                    TranslatableComponent("text.observable.entity_not_found", level.toString()),
+                                                                                    true
+                                                                            )
+                                                                }
+                                                                1
+                                                            }
+                                                    )
+                                            )
+                                            .then(
+                                                    literal("position")
+                                                            .then(
+                                                                    argument("pos", blockPos()).executes { ctx ->
+                                                                        withDimMove(ctx) { player, _ ->
+                                                                            val pos = getLoadedBlockPos(ctx, "pos")
+                                                                            player.moveTo(pos, 0F, 0F)
+                                                                        }
+                                                                        1
+                                                                    }
+                                                            )
+
+                                            )
+                            )
+                    )
 
             dispatcher.register(cmd)
         }
@@ -286,12 +313,12 @@ object Observable {
             if (player.level != level) {
                 with(player.position()) {
                     (player as ServerPlayer).teleportTo(
-                        level,
-                        x,
-                        y,
-                        z,
-                        player.rotationVector.x,
-                        player.rotationVector.y
+                            level,
+                            x,
+                            y,
+                            z,
+                            player.rotationVector.x,
+                            player.rotationVector.y
                     )
                 }
             }
