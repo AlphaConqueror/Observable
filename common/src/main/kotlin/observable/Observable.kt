@@ -75,7 +75,11 @@ object Observable {
             val luckPerms = LuckPermsProvider.get()
             return getUser(luckPerms, player.gameProfile.id).cachedData
                     .permissionData.checkPermission(PERMISSION_NODE).asBoolean()
-        } catch (ignored: IllegalStateException) {}
+        } catch (ignored: IllegalStateException) {
+            // ignored
+        } catch (ignored: NoClassDefFoundError) {
+            // ignored
+        }
 
         if (GameInstance.getServer()?.playerList?.isOp(player.gameProfile) != false) return true
         return GameInstance.getServer()?.isSingleplayer ?: false

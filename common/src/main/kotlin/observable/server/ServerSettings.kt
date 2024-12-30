@@ -12,9 +12,9 @@ import kotlin.io.path.exists
 import kotlin.io.path.readText
 import kotlin.io.path.writeText
 
+val JSON = Json { encodeDefaults = true }
 val configFile: Path by lazy { Platform.getConfigFolder().resolve("observable.json") }
 val ServerSettings by lazy { loadSettings() }
-
 val TypeMap = mapOf(Integer.TYPE to { integer() }, java.lang.Boolean.TYPE to { bool() })
 
 @Serializable
@@ -25,14 +25,15 @@ data class ServerSettingsData(
     var allPlayersAllowed: Boolean = false,
     var allowedPlayers: MutableSet<String> = mutableSetOf()
 ) {
-    fun sync() = configFile.writeText(Json.encodeToString(this))
+    fun sync() = configFile.writeText(JSON.encodeToString(this))
 }
 
 fun loadSettings(): ServerSettingsData {
     if (!configFile.exists()) {
         val settings = ServerSettingsData()
-        configFile.writeText(Json.encodeToString(settings))
+        configFile.writeText(JSON.encodeToString(settings))
         return settings
     }
-    return Json.decodeFromString(configFile.readText())
+
+    return JSON.decodeFromString(configFile.readText())
 }
